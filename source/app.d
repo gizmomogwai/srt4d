@@ -1,11 +1,13 @@
+import core.thread;
+import deimos.ncurses.ncurses;
 import srt;
-import std.stdio;
+import std.algorithm;
 import std.concurrency;
 import std.datetime;
-import core.thread;
 import std.range;
-import std.algorithm;
-import deimos.ncurses.ncurses;
+import std.stdio;
+import std.string : format;
+import std.typecons;
 
 struct Done {}
 struct Rewind {}
@@ -13,42 +15,54 @@ struct TogglePause {}
 enum State {NoSubtitleActive, WaitingForSubtitle, SubtitleActive, Paused};
 
 interface Renderer {
-  public void show(Subtitle sub);
-  public void show(Duration offset);
-  public void clear();
-  public void finished();
+  public void show(Subtitle sub) immutable;
+  public void show(Duration offset) immutable;
+  public void show(string message) immutable;
+  public void clear() immutable;
+  public void finished() immutable;
+}
+
+string formattedAsSrt(Duration d) {
+  return format("%02s:%02s:%02s.%03s",
+                d.hours,
+                d.minutes,
+                d.seconds,
+                d.fracSec.msecs);
 }
 class NCursesRenderer : Renderer {
   import std.string;
   this() {
     initscr(); cbreak(); noecho();
   }
-  public void show(Subtitle sub) {
+  public void show(Subtitle sub) immutable {
+    erase();
     int idx = 0;
     foreach (line; sub.fLines) {
       mvprintw(idx++, 0, toStringz(line));
     }
     refresh();
   }
-  public void show(Duration offset) {
-    //mvprintw(5, 0, toStringz(offset.toString()));
-    mvprintw(5, 0, toStringz(format("%s:%s:%s.%s", offset.hours, offset.minutes, offset.seconds, offset.fracSec.msecs)));
-    //mvprintw(5, 0, toStringz(std.string.format("%s:%s:%s.%s", offset.hours, offset.minutes, offset.seconds, offset.msecs)));
+  public void show(Duration offset) immutable {
+    mvprintw(5, 0, toStringz(offset.formattedAsSrt()));
     refresh();
   }
-  public void clear() {
+  public void show(string message) immutable {
+    mvprintw(5, 0, toStringz(message));
+    refresh();
+  }
+  public void clear() immutable {
     erase();
     refresh();
   }
-  public void finished() {
+  public void finished() immutable {
     endwin();
   }
 }
 class DebugNCursesRenderer : NCursesRenderer {
-  override public void show(Subtitle sub) {
+  override public void show(Subtitle sub) immutable {
     import std.string: toStringz;
     int idx = 0;
-    mvprintw(idx++, 0, toStringz(sub.fStartOffset.toString()));
+    mvprintw(idx++, 0, toStringz(sub.fStartOffset.formattedAsSrt()));
     foreach (line; sub.fLines) {
       mvprintw(idx++, 0, toStringz(line));
     }
@@ -56,25 +70,27 @@ class DebugNCursesRenderer : NCursesRenderer {
   }
 }
 class WritelnRenderer : Renderer {
-  public void show(Subtitle sub) {
-    writeln(sub.fStartOffset);
+  public void show(Subtitle sub) immutable {
+    writeln(sub.fStartOffset.formattedAsSrt());
     foreach (line; sub.fLines) {
       writeln(line);
     }
   }
-  public void show(Duration offset) {
-    writeln(offset);
+  public void show(Duration offset) immutable {
+    writeln(offset.formattedAsSrt());
   }
-  public void clear() {
+  public void show(string message) immutable {
+    writeln(message);
+  }
+  public void clear() immutable {
     writeln();
     writeln();
     writeln();
   }
-  public void finished() {}
+  public void finished() immutable {}
 }
 
-void renderLoop(Tid controller, string filePath, string rendererClass) {
-  Renderer renderer = cast(Renderer)Object.factory(rendererClass);
+void renderLoop(Tid controller, string filePath, immutable(Renderer) renderer) {
   auto subtitles = SrtSubtitles.Builder.parse(File(filePath));
   bool running = true;
   auto sortedSubtitles = assumeSorted(subtitles.fSubtitles);
@@ -89,10 +105,10 @@ void renderLoop(Tid controller, string filePath, string rendererClass) {
     wait = Duration.zero;
     switch (s) {
     case State.NoSubtitleActive: {
-      auto help = Subtitle("", currentOffset, msecs(0)/*dur!("msecs")(0)*/, null);
+      auto help = Subtitle("", currentOffset, 0.msecs(), null);
       auto nextSubtitles = sortedSubtitles.upperBound(help);
       if (nextSubtitles.length == 0) {
-        wait = dur!("seconds")(1);
+        wait = 1.seconds();
         break;
       }
       activeSubtitle = nextSubtitles[0];
@@ -136,12 +152,12 @@ void renderLoop(Tid controller, string filePath, string rendererClass) {
                      },
                      (TogglePause p) {
                        if (s == State.Paused) {
-                         writeln("leaving pause");
+                         renderer.show("leaving pause");
                          auto currentTime = Clock.currTime();
                          startTime = currentTime - offsetBeforePause;
                          s = State.NoSubtitleActive;
                        } else {
-                         writeln("entering pause");
+                         renderer.show("entering pause");
                          auto currentTime = Clock.currTime();
                          offsetBeforePause = currentTime - startTime;
                          s = State.Paused;
@@ -177,33 +193,29 @@ void stdioController(Tid mainProgram, Tid renderer) {
 
 void nCursesController(Tid mainProgram, Tid renderer) {
   int ch = getch();
-  Duration[int] rewinds;
-  rewinds['q'] = dur!("msecs")(100);
-  rewinds['w'] = dur!("msecs")(1_000);
-  rewinds['e'] = dur!("msecs")(2_000);
-  rewinds['r'] = dur!("msecs")(10_000);
-  Duration[int] forwards;
-  forwards['a'] = dur!("msecs")(-100);
-  forwards['s'] = dur!("msecs")(-1_000);
-  forwards['d'] = dur!("msecs")(-2_000);
-  forwards['f'] = dur!("msecs")(-10_000);
+  Duration[int] ffwd;
+  ffwd['q'] = dur!("msecs")(100);
+  ffwd['w'] = dur!("msecs")(1_000);
+  ffwd['e'] = dur!("msecs")(2_000);
+  ffwd['r'] = dur!("msecs")(10_000);
+  ffwd['a'] = dur!("msecs")(-100);
+  ffwd['s'] = dur!("msecs")(-1_000);
+  ffwd['d'] = dur!("msecs")(-2_000);
+  ffwd['f'] = dur!("msecs")(-10_000);
   while (true) {
-    if (ch == KEY_F(10)) {
+    if (ch == KEY_F(10) || ch == 'X') {
       Done done;
       prioritySend(renderer, done);
       prioritySend(mainProgram, done);
       break;
-    } else if (ch in rewinds) {
+    } else if (ch in ffwd) {
       Rewind rewind;
-      send(renderer, rewind, rewinds[ch]);
-    } else if (ch in forwards) {
-      Rewind rewind;
-      send(renderer, rewind, forwards[ch]);
+      send(renderer, rewind, ffwd[ch]);
     } else if (ch == ' ') {
       TogglePause p;
       send(renderer, p);
     } else {
-      Thread.sleep(dur!("msecs")(10));
+      Thread.sleep(10.msecs());
     }
     ch = getch();
   }
@@ -211,30 +223,40 @@ void nCursesController(Tid mainProgram, Tid renderer) {
 
 int  main(string[] args) {
   import std.getopt;
-  string rendererClass = "app.NCursesRenderer";
+  string io = "ncurses";
   bool usage = false;
   bool verbose = false;
   getopt(args,
-         "h", &usage,
-         "d", &verbose,
-         "r", &rendererClass);
+         "h|help", &usage,
+         "v|verbose", &verbose,
+         "i|io", &io);
   if (usage) {
     writeln("Usage: ",
             args[0], "\n"
-            "  h -- for help\n",
-            "  d -- for debug\n",
-            "  r -- renderer (app.NCursesRenderer, app.DebugNCursesRenderer, app.WritelnRenderer)\n");
+            "  h|help    -- for help\n",
+            "  v|verbose -- for debug\n",
+            "  i|io -- used io (ncurses or stdio)\n");
     return 0;
   }
   string inputFile = args[1];
-  auto renderer = spawn(&renderLoop, thisTid, inputFile, rendererClass);
-  //auto controller = spawn(&nCursesController, thisTid, renderer);
-  auto controller = spawn(&stdioController, thisTid, renderer);
+  auto args2impl = [
+    "stdio": tuple("app.WritelnRenderer", &stdioController),
+    "ncurses":tuple("app.NCursesRenderer", &nCursesController)
+  ];
+  if (!(io in args2impl)) {
+    return 1;
+  }
+  string rendererClass = args2impl[io][0];
+  auto controller = args2impl[io][1];
+  auto rendererInstance = cast(immutable(Renderer))Object.factory(rendererClass);
+  auto rendererThread = spawn(&renderLoop, thisTid, inputFile, rendererInstance);
+  auto controllerThread = spawn(controller, thisTid, rendererThread);
   receive(
     (Done done) {writeln("first child finished");}
   );
   receive(
     (Done done) {writeln("second child finished");}
   );
+  rendererInstance.finished();
   return 0;
 }

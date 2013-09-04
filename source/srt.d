@@ -47,11 +47,11 @@ struct Subtitle {
       return null;
     }
   }
- string fNr;
- string[] fLines;
- Duration fStartOffset;
- Duration fEndOffset;
- Duration fDuration;
+  string fNr;
+  string[] fLines;
+  Duration fStartOffset;
+  Duration fEndOffset;
+  Duration fDuration;
   this(string nr, Duration startOffset, Duration endOffset, string[] lines) {
     fNr = nr;
     fLines = lines;
@@ -59,7 +59,7 @@ struct Subtitle {
     fEndOffset = endOffset;
     fDuration = fEndOffset - fStartOffset;
   }
- int opCmp(Subtitle other) {
+  int opCmp(Subtitle other) {
     return fStartOffset.opCmp(other.fStartOffset);
   }
 }
