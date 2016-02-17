@@ -12,7 +12,7 @@ import std.typecons;
 struct Done {}
 struct Rewind {}
 struct TogglePause {}
-enum State {NoSubtitleActive, WaitingForSubtitle, SubtitleActive, Paused};
+enum State {NoSubtitleActive, WaitingForSubtitle, SubtitleActive, Paused}
 
 interface Renderer {
   public void show(Subtitle sub) immutable;
@@ -23,16 +23,23 @@ interface Renderer {
 }
 
 string formattedAsSrt(Duration d) {
-  return format("%02s:%02s:%02s.%03s",
-                d.hours,
-                d.minutes,
-                d.seconds,
-                d.fracSec.msecs);
+  long hours;
+  long minutes;
+  long seconds;
+  long msecs;
+  d.split!("hours", "minutes", "seconds", "msecs")(hours, minutes, seconds, msecs);
+  return format("%02s:%02s:%02s.%03s", hours, minutes, seconds, msecs);
 }
+
+
 class NCursesRenderer : Renderer {
   import std.string;
   this() {
-    initscr(); cbreak(); noecho();
+    import std.c.locale;
+    setlocale(LC_CTYPE,"");
+    initscr();
+    cbreak();
+    noecho();
   }
   public void show(Subtitle sub) immutable {
     erase();
@@ -60,7 +67,8 @@ class NCursesRenderer : Renderer {
 }
 class DebugNCursesRenderer : NCursesRenderer {
   override public void show(Subtitle sub) immutable {
-    import std.string: toStringz;
+import std.string:
+    toStringz;
     int idx = 0;
     mvprintw(idx++, 0, toStringz(sub.fStartOffset.formattedAsSrt()));
     foreach (line; sub.fLines) {
@@ -69,6 +77,7 @@ class DebugNCursesRenderer : NCursesRenderer {
     refresh();
   }
 }
+
 class WritelnRenderer : Renderer {
   public void show(Subtitle sub) immutable {
     writeln(sub.fStartOffset.formattedAsSrt());
@@ -91,11 +100,11 @@ class WritelnRenderer : Renderer {
 }
 
 void renderLoop(Tid controller, string filePath, immutable(Renderer) renderer) {
-  auto subtitles = SrtSubtitles.Builder.parse(File(filePath));
-  bool running = true;
+  auto subtitles = SrtSubtitles.Builder.parse(filePath);
+  auto running = true;
   auto sortedSubtitles = assumeSorted(subtitles.fSubtitles);
   auto startTime = Clock.currTime();
-  State s = State.NoSubtitleActive;
+  auto s = State.NoSubtitleActive;
   Subtitle activeSubtitle;
   Duration wait;
   Duration offsetBeforePause;
@@ -137,32 +146,32 @@ void renderLoop(Tid controller, string filePath, immutable(Renderer) renderer) {
     }
     if (wait.total!("msecs") > 0) {
       receiveTimeout(wait,
-                     (Done done) {
-                       running = false;
-                     },
-                     (OwnerTerminated msg) {
-                       running = false;
-                     },
-                     (Rewind rewind, Duration d) {
-                       startTime += d;
-                       s = State.NoSubtitleActive;
-                       auto currentTime = Clock.currTime();
-                       auto currentOffset = currentTime - startTime;
-                       renderer.show(currentOffset);
-                     },
-                     (TogglePause p) {
-                       if (s == State.Paused) {
-                         renderer.show("leaving pause");
-                         auto currentTime = Clock.currTime();
-                         startTime = currentTime - offsetBeforePause;
-                         s = State.NoSubtitleActive;
-                       } else {
-                         renderer.show("entering pause");
-                         auto currentTime = Clock.currTime();
-                         offsetBeforePause = currentTime - startTime;
-                         s = State.Paused;
-                       }
-                     });
+      (Done done) {
+        running = false;
+      },
+      (OwnerTerminated msg) {
+        running = false;
+      },
+      (Rewind rewind, Duration d) {
+        startTime += d;
+        s = State.NoSubtitleActive;
+        auto currentTime = Clock.currTime();
+        auto currentOffset = currentTime - startTime;
+        renderer.show(currentOffset);
+      },
+      (TogglePause p) {
+        if (s == State.Paused) {
+          renderer.show("leaving pause");
+          auto currentTime = Clock.currTime();
+          startTime = currentTime - offsetBeforePause;
+          s = State.NoSubtitleActive;
+        } else {
+          renderer.show("entering pause");
+          auto currentTime = Clock.currTime();
+          offsetBeforePause = currentTime - startTime;
+          s = State.Paused;
+        }
+      });
     }
   }
   Done done;
@@ -190,6 +199,7 @@ void stdioController(Tid mainProgram, Tid renderer) {
     }
   }
 }
+
 
 void nCursesController(Tid mainProgram, Tid renderer) {
   int ch = getch();
@@ -223,9 +233,9 @@ void nCursesController(Tid mainProgram, Tid renderer) {
 
 int  main(string[] args) {
   import std.getopt;
-  string io = "ncurses";
-  bool usage = false;
-  bool verbose = false;
+  auto io = "ncurses";
+  auto usage = false;
+  auto verbose = false;
   getopt(args,
          "h|help", &usage,
          "v|verbose", &verbose,
@@ -238,24 +248,28 @@ int  main(string[] args) {
             "  i|io -- used io (ncurses or stdio)\n");
     return 0;
   }
-  string inputFile = args[1];
+  auto inputFile = args[1];
   auto args2impl = [
-    "stdio": tuple("app.WritelnRenderer", &stdioController),
-    "ncurses":tuple("app.NCursesRenderer", &nCursesController)
-  ];
+                     "stdio": tuple("app.WritelnRenderer", &stdioController),
+                     "ncurses": tuple("app.NCursesRenderer", &nCursesController)
+                   ];
   if (!(io in args2impl)) {
     return 1;
   }
-  string rendererClass = args2impl[io][0];
+  auto rendererClass = args2impl[io][0];
   auto controller = args2impl[io][1];
   auto rendererInstance = cast(immutable(Renderer))Object.factory(rendererClass);
   auto rendererThread = spawn(&renderLoop, thisTid, inputFile, rendererInstance);
   auto controllerThread = spawn(controller, thisTid, rendererThread);
   receive(
-    (Done done) {writeln("first child finished");}
+  (Done done) {
+    writeln("first child finished");
+  }
   );
   receive(
-    (Done done) {writeln("second child finished");}
+  (Done done) {
+    writeln("second child finished");
+  }
   );
   rendererInstance.finished();
   return 0;

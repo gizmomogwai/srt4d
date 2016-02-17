@@ -1,0 +1,3 @@
+* simple commandline / ncurses srt file renderer
+** Prerequisites
+brew install ncurses

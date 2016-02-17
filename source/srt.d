@@ -1,9 +1,12 @@
 module srt;
-import std.stdio;
-import std.array;
-import std.conv;
-import std.regex;
-import core.time;
+import std.stdio,
+  std.array,
+  std.conv,
+  std.regex,
+  core.time,
+  std.conv,
+  std.string,
+  std.encoding;
 
 struct Subtitle {
   struct Builder {
@@ -65,11 +68,23 @@ struct Subtitle {
 }
 struct SrtSubtitles {
   struct Builder {
-    static SrtSubtitles parse(File f) {
+    static string getFileContent(string filePath) {
+      auto content = cast(const(ubyte)[])std.file.read(filePath);
+      auto e = EncodingScheme.create("utf-8");
+      string res;
+      auto s  = e.decode(content);
+      while (content.length > 0) {
+        res ~= s;
+        s = e.decode(content);
+      }
+      return res;
+    }
+    static SrtSubtitles parse(string filePath) {
       Subtitle[] subtitles;
       auto currentSubtitle = Subtitle.Builder();
-      foreach (line; f.byLine()) {
-        auto res = currentSubtitle.add(line.length > 1 ? line.to!(string) : null);
+      auto content = getFileContent(filePath);
+      foreach (line; content.splitLines()) {
+        auto res = currentSubtitle.add(line.length > 0 ? line.to!(string) : null);
         if (res != null) {
           subtitles ~= *res;
           currentSubtitle = Subtitle.Builder();
