@@ -9,10 +9,21 @@ import std.stdio;
 import std.string : format;
 import std.typecons;
 
-struct Done {}
-struct Rewind {}
-struct TogglePause {}
-enum State {NoSubtitleActive, WaitingForSubtitle, SubtitleActive, Paused}
+struct Done {
+}
+
+struct Rewind {
+}
+
+struct TogglePause {
+}
+
+enum State {
+  NoSubtitleActive,
+  WaitingForSubtitle,
+  SubtitleActive,
+  Paused
+}
 
 interface Renderer {
   public void show(Subtitle sub) immutable;
@@ -31,16 +42,18 @@ string formattedAsSrt(Duration d) {
   return format("%02s:%02s:%02s.%03s", hours, minutes, seconds, msecs);
 }
 
-
 class NCursesRenderer : Renderer {
   import std.string;
+
   this() {
     import std.c.locale;
-    setlocale(LC_CTYPE,"");
+
+    setlocale(LC_CTYPE, "");
     initscr();
     cbreak();
     noecho();
   }
+
   public void show(Subtitle sub) immutable {
     erase();
     int idx = 0;
@@ -49,26 +62,31 @@ class NCursesRenderer : Renderer {
     }
     refresh();
   }
+
   public void show(Duration offset) immutable {
     mvprintw(5, 0, toStringz(offset.formattedAsSrt()));
     refresh();
   }
+
   public void show(string message) immutable {
     mvprintw(5, 0, toStringz(message));
     refresh();
   }
+
   public void clear() immutable {
     erase();
     refresh();
   }
+
   public void finished() immutable {
     endwin();
   }
 }
+
 class DebugNCursesRenderer : NCursesRenderer {
   override public void show(Subtitle sub) immutable {
-import std.string:
-    toStringz;
+    import std.string : toStringz;
+
     int idx = 0;
     mvprintw(idx++, 0, toStringz(sub.fStartOffset.formattedAsSrt()));
     foreach (line; sub.fLines) {
@@ -85,18 +103,23 @@ class WritelnRenderer : Renderer {
       writeln(line);
     }
   }
+
   public void show(Duration offset) immutable {
     writeln(offset.formattedAsSrt());
   }
+
   public void show(string message) immutable {
     writeln(message);
   }
+
   public void clear() immutable {
     writeln();
     writeln();
     writeln();
   }
-  public void finished() immutable {}
+
+  public void finished() immutable {
+  }
 }
 
 void renderLoop(Tid controller, string filePath, immutable(Renderer) renderer) {
@@ -114,52 +137,46 @@ void renderLoop(Tid controller, string filePath, immutable(Renderer) renderer) {
     wait = Duration.zero;
     switch (s) {
     case State.NoSubtitleActive: {
-      auto help = Subtitle("", currentOffset, 0.msecs(), null);
-      auto nextSubtitles = sortedSubtitles.upperBound(help);
-      if (nextSubtitles.length == 0) {
-        wait = 1.seconds();
+        auto help = Subtitle("", currentOffset, 0.msecs(), null);
+        auto nextSubtitles = sortedSubtitles.upperBound(help);
+        if (nextSubtitles.length == 0) {
+          wait = 1.seconds();
+          break;
+        }
+        activeSubtitle = nextSubtitles[0];
+        s = State.WaitingForSubtitle;
+        wait = activeSubtitle.fStartOffset - currentOffset;
         break;
       }
-      activeSubtitle = nextSubtitles[0];
-      s = State.WaitingForSubtitle;
-      wait = activeSubtitle.fStartOffset - currentOffset;
-      break;
-    }
     case State.WaitingForSubtitle: {
-      renderer.show(activeSubtitle);
-      s = State.SubtitleActive;
-      wait = activeSubtitle.fEndOffset - currentOffset;
-      break;
-    }
+        renderer.show(activeSubtitle);
+        s = State.SubtitleActive;
+        wait = activeSubtitle.fEndOffset - currentOffset;
+        break;
+      }
     case State.SubtitleActive: {
-      renderer.clear();
-      s = State.NoSubtitleActive;
-      break;
-    }
+        renderer.clear();
+        s = State.NoSubtitleActive;
+        break;
+      }
     case State.Paused:
       wait = 1.seconds();
       break;
     default: {
-      writeln("not yet implemented for ", s);
-      throw new Exception("nyi");
-    }
+        writeln("not yet implemented for ", s);
+        throw new Exception("nyi");
+      }
     }
     if (wait.total!("msecs") > 0) {
-      receiveTimeout(wait,
-      (Done done) {
+      receiveTimeout(wait, (Done done) { running = false; }, (OwnerTerminated msg) {
         running = false;
-      },
-      (OwnerTerminated msg) {
-        running = false;
-      },
-      (Rewind rewind, Duration d) {
+      }, (Rewind rewind, Duration d) {
         startTime += d;
         s = State.NoSubtitleActive;
         auto currentTime = Clock.currTime();
         auto currentOffset = currentTime - startTime;
         renderer.show(currentOffset);
-      },
-      (TogglePause p) {
+      }, (TogglePause p) {
         if (s == State.Paused) {
           renderer.show("leaving pause");
           auto currentTime = Clock.currTime();
@@ -187,10 +204,10 @@ void stdioController(Tid mainProgram, Tid renderer) {
       break;
     } else if (line.startsWith("r")) {
       Rewind rewind;
-      send(renderer, rewind, dur!("msecs")(line.length*100));
+      send(renderer, rewind, dur!("msecs")(line.length * 100));
     } else if (line.startsWith("f")) {
       Rewind rewind;
-      send(renderer, rewind, dur!("msecs")(-line.length*100));
+      send(renderer, rewind, dur!("msecs")(-line.length * 100));
     } else if (line.startsWith(" ")) {
       TogglePause p;
       send(renderer, p);
@@ -199,7 +216,6 @@ void stdioController(Tid mainProgram, Tid renderer) {
     }
   }
 }
-
 
 void nCursesController(Tid mainProgram, Tid renderer) {
   int ch = getch();
@@ -231,46 +247,38 @@ void nCursesController(Tid mainProgram, Tid renderer) {
   }
 }
 
-int  main(string[] args) {
+void writeUsage(string[] args) {
+  writeln("Usage: ", args[0], "\n", "  h|help    -- for help\n",
+    "  v|verbose -- for debug\n", "  i|io -- used io (ncurses or stdio)\n");
+}
+
+int main(string[] args) {
   import std.getopt;
+
   auto io = "ncurses";
   auto usage = false;
   auto verbose = false;
-  getopt(args,
-         "h|help", &usage,
-         "v|verbose", &verbose,
-         "i|io", &io);
+  getopt(args, "h|help", &usage, "v|verbose", &verbose, "i|io", &io);
   if (usage) {
-    writeln("Usage: ",
-            args[0], "\n"
-            "  h|help    -- for help\n",
-            "  v|verbose -- for debug\n",
-            "  i|io -- used io (ncurses or stdio)\n");
+    writeUsage(args);
     return 0;
   }
   auto inputFile = args[1];
   auto args2impl = [
-                     "stdio": tuple("app.WritelnRenderer", &stdioController),
-                     "ncurses": tuple("app.NCursesRenderer", &nCursesController)
-                   ];
+    "stdio" : tuple("app.WritelnRenderer", &stdioController),
+    "ncurses" : tuple("app.NCursesRenderer", &nCursesController)
+  ];
   if (!(io in args2impl)) {
+    writeUsage(args);
     return 1;
   }
   auto rendererClass = args2impl[io][0];
   auto controller = args2impl[io][1];
-  auto rendererInstance = cast(immutable(Renderer))Object.factory(rendererClass);
+  auto rendererInstance = cast(immutable(Renderer)) Object.factory(rendererClass);
   auto rendererThread = spawn(&renderLoop, thisTid, inputFile, rendererInstance);
   auto controllerThread = spawn(controller, thisTid, rendererThread);
-  receive(
-  (Done done) {
-    writeln("first child finished");
-  }
-  );
-  receive(
-  (Done done) {
-    writeln("second child finished");
-  }
-  );
+  receive((Done done) { writeln("first child finished"); });
+  receive((Done done) { writeln("second child finished"); });
   rendererInstance.finished();
   return 0;
 }
