@@ -1,4 +1,7 @@
+def format
+  "dfmt -i --brace_style otbs --align_switch_statements=false"
+end
 task :default do
-  sh "dfmt -i --brace_style otbs source/app.d"
-  sh "dfmt -i --brace_style otbs source/srt.d"
+  sh "#{format} source/app.d"
+  sh "#{format} source/srt.d"
 end
