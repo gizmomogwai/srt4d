@@ -29,9 +29,9 @@ struct Subtitle {
           throw new Exception("unknown timestamp formt : " ~ fTime);
         }
         Duration startOffset = convertToDuration(m.captures[1], m.captures[2],
-          m.captures[3], m.captures[4]);
+                                                 m.captures[3], m.captures[4]);
         Duration endOffset = convertToDuration(m.captures[5], m.captures[6],
-          m.captures[7], m.captures[8]);
+                                               m.captures[7], m.captures[8]);
         return new Subtitle(fNr, startOffset, endOffset, fLines.dup);
       }
 
@@ -92,6 +92,7 @@ struct SrtSubtitles {
           subtitles ~= *res;
           currentSubtitle = Subtitle.Builder();
         }
+
       }
       return SrtSubtitles(subtitles.dup);
     }
